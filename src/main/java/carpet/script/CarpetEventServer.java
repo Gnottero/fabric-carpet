@@ -537,6 +537,27 @@ public class CarpetEventServer
             }
         };
 
+
+        // [Begin] Implementing in-world event system
+
+        // BellRingsEvent - Called when a bell is being rung.
+        public static final Event BELL_RINGS = new Event("bell_rings", 3, true) {
+            @Override
+            public boolean onBellRings(ServerLevel level, BlockPos blockPos, Direction direction, Entity entity)
+            {
+                return handler.call(
+                        () -> Arrays.asList(
+                                ValueConversions.of(blockPos),
+                                StringValue.of(direction.getName()),
+                                EntityValue.of(entity)
+                        ), () -> level.getServer().createCommandSourceStack().withLevel(level)
+                );
+            }
+        };
+
+        // [End] Implementing in-world event system
+
+
         public static final Event PLAYER_JUMPS = new Event("player_jumps", 1, false)
         {
             @Override
@@ -1227,6 +1248,11 @@ public class CarpetEventServer
 
         public void onChunkEvent(ServerLevel world, ChunkPos chPos, boolean generated)
         {
+        }
+
+        public boolean onBellRings(ServerLevel level, BlockPos blockPos, Direction direction, Entity entity)
+        {
+            return false;
         }
 
         public boolean onPlayerEvent(ServerPlayer player)
