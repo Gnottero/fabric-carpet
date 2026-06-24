@@ -237,11 +237,49 @@ public class Entities
                 throw new InternalExpressionException("'query' takes entity as a first argument, and queried feature as a second");
             }
             Value v = lv.get(0);
+            String what = lv.get(1).getString().toLowerCase(Locale.ROOT);
+            
+            if (what.equals("component") || what.equals("components")) {
+                CarpetContext cc = (CarpetContext) c;
+                net.minecraft.world.item.ItemStack stack = carpet.script.value.ValueConversions.getItemStackFromValue(v, true, cc.registryAccess());
+                if (stack.isEmpty()) return Value.NULL;
+                
+                String compName = lv.size() > 2 && !lv.get(2).isNull() ? lv.get(2).getString() : null;
+                boolean isDefault = lv.size() > 3 && lv.get(3).getBoolean();
+                
+                if (compName == null) {
+                    java.util.Map<Value, Value> result = new java.util.HashMap<>();
+                    net.minecraft.core.component.DataComponentMap compMap = isDefault ? stack.getItem().components() : stack.getComponents();
+                    net.minecraft.core.Registry<net.minecraft.core.component.DataComponentType<?>> reg = cc.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.DATA_COMPONENT_TYPE);
+                    for (net.minecraft.core.component.TypedDataComponent<?> tdc : compMap) {
+                        net.minecraft.core.component.DataComponentType<?> type = tdc.type();
+                        net.minecraft.resources.Identifier id = reg.getKey(type);
+                        if (id == null) continue;
+                        try {
+                            com.mojang.serialization.Codec<Object> codec = (com.mojang.serialization.Codec<Object>) type.codecOrThrow();
+                            net.minecraft.nbt.Tag tag = codec.encodeStart(cc.registryAccess().createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE), tdc.value()).getOrThrow(err -> new InternalExpressionException(err));
+                            result.put(new carpet.script.value.StringValue(id.toString()), new carpet.script.value.NBTSerializableValue(tag));
+                        } catch (Exception ignored) { }
+                    }
+                    return carpet.script.value.MapValue.wrap(result);
+                }
+                
+                net.minecraft.core.component.DataComponentType<?> type = cc.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.DATA_COMPONENT_TYPE).get(net.minecraft.resources.Identifier.tryParse(compName)).orElseThrow(() -> new InternalExpressionException("Unknown component: " + compName)).value();
+                Object compValue = isDefault ? stack.getItem().components().get(type) : stack.get(type);
+                if (compValue == null) return Value.NULL;
+                try {
+                    com.mojang.serialization.Codec<Object> codec = (com.mojang.serialization.Codec<Object>) type.codecOrThrow();
+                    net.minecraft.nbt.Tag tag = codec.encodeStart(cc.registryAccess().createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE), compValue).getOrThrow(err -> new InternalExpressionException(err));
+                    return new carpet.script.value.NBTSerializableValue(tag);
+                } catch (Exception e) {
+                    throw new InternalExpressionException("Cannot serialize component: " + e.getMessage());
+                }
+            }
+            
             if (!(v instanceof final EntityValue ev))
             {
                 throw new InternalExpressionException("First argument to query should be an entity");
             }
-            String what = lv.get(1).getString().toLowerCase(Locale.ROOT);
             if (what.equals("tags"))
             {
                 c.host.issueDeprecation("'tags' for entity querying");
@@ -262,11 +300,37 @@ public class Entities
                 throw new InternalExpressionException("'modify' takes entity as a first argument, and queried feature as a second");
             }
             Value v = lv.get(0);
+            String what = lv.get(1).getString();
+            
+            if (what.equals("component") || what.equals("components")) {
+                CarpetContext cc = (CarpetContext) c;
+                net.minecraft.world.item.ItemStack stack = carpet.script.value.ValueConversions.getItemStackFromValue(v, true, cc.registryAccess());
+                if (stack.isEmpty()) return Value.NULL;
+                
+                String compName = lv.size() > 2 && !lv.get(2).isNull() ? lv.get(2).getString() : null;
+                if (compName == null) throw new InternalExpressionException("'modify' for components requires a component name");
+                net.minecraft.core.component.DataComponentType<?> type = cc.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.DATA_COMPONENT_TYPE).get(net.minecraft.resources.Identifier.tryParse(compName)).orElseThrow(() -> new InternalExpressionException("Unknown component: " + compName)).value();
+                
+                Value newValue = lv.size() > 3 ? lv.get(3) : Value.NULL;
+                if (newValue.isNull()) {
+                    stack.remove(type);
+                } else {
+                    try {
+                        com.mojang.serialization.Codec<Object> codec = (com.mojang.serialization.Codec<Object>) type.codecOrThrow();
+                        net.minecraft.nbt.Tag tag = ((carpet.script.value.NBTSerializableValue) carpet.script.value.NBTSerializableValue.fromValue(newValue)).getTag();
+                        Object parsedValue = codec.parse(cc.registryAccess().createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE), tag).getOrThrow(err -> new InternalExpressionException(err));
+                        stack.set((net.minecraft.core.component.DataComponentType) type, parsedValue);
+                    } catch (Exception e) {
+                        throw new InternalExpressionException("Cannot modify component: " + e.getMessage());
+                    }
+                }
+                return carpet.script.value.ValueConversions.of(stack, cc.registryAccess());
+            }
+
             if (!(v instanceof final EntityValue ev))
             {
                 throw new InternalExpressionException("First argument to modify should be an entity");
             }
-            String what = lv.get(1).getString();
             switch (lv.size())
             {
                 case 2 -> ev.set(what, null);
