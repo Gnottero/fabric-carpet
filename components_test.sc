@@ -1,9 +1,5 @@
 // components_test.sc
-// Dimostra il nuovo sistema di import e la manipolazione dei Data Components
-
-import 'inventories' as inv; // Alias per le funzioni di inventario, anche se globali, 
-// l'utente ha chiesto di testare il namespace pulito dove possibile (non applicabile a builtins diretti,
-// ma l'utente ha chiesto di poter usare gli import per abbellire il codice)
+// Dimostra la manipolazione dei Data Components tramite le nuove funzioni built-in
 
 // Creiamo un item di test
 item = ['diamond_sword', 1, null];
