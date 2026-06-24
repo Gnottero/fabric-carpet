@@ -1265,9 +1265,22 @@ public class Expression
                 functions = override == LoadOverride.FUNCTIONAL || override == LoadOverride.FUNCTIONAL_OPTIMIZED;
             }
 
+            if (this.module != null && c.host != null) {
+                ExpressionNode cached = c.host.scriptServer().moduleASTCache.get(this.module.name());
+                if (cached != null) {
+                    this.root = cached;
+                    this.ast = cached.op;
+                    return Pair.of(evaluatePartial(() -> ast, c, Context.Type.NONE), root);
+                }
+            }
+
             Pair<ExpressionNode, LazyValue> ret = getAST(c, optimize, functions, logger);
             ast = ret.getRight();
             root = ret.getLeft();
+            
+            if (this.module != null && c.host != null) {
+                c.host.scriptServer().moduleASTCache.put(this.module.name(), root);
+            }
         }
         return Pair.of(evaluatePartial(() -> ast, c, Context.Type.NONE), root);
     }

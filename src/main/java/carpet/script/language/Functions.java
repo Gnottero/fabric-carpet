@@ -24,21 +24,7 @@ public class Functions
     public static void apply(Expression expression) // public just to get the javadoc right
     {
         // artificial construct to handle user defined functions and function definitions
-        expression.addContextFunction("import", -1, (c, t, lv) ->
-        {
-            if (lv.size() < 1)
-            {
-                throw new InternalExpressionException("'import' needs at least a module name to import, and list of values to import");
-            }
-            String moduleName = lv.get(0).getString();
-            c.host.importModule(c, moduleName);
-            moduleName = moduleName.toLowerCase(Locale.ROOT);
-            if (lv.size() > 1)
-            {
-                c.host.importNames(c, expression.module, moduleName, lv.subList(1, lv.size()).stream().map(Value::getString).toList());
-            }
-            return t == Context.VOID ? Value.NULL : ListValue.wrap(c.host.availableImports(moduleName).map(StringValue::new));
-        });
+        // import is now handled as an operator in Operators.java
 
 
         // needs to be lazy because of custom context of execution of arguments as a signature

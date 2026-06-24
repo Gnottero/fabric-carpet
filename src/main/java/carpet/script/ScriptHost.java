@@ -10,6 +10,8 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.commons.lang3.tuple.Pair;
+
 import org.jspecify.annotations.Nullable;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -74,20 +76,16 @@ public abstract class ScriptHost
         public final Map<String, ModuleData> functionImports = new Object2ObjectOpenHashMap<>(); // imported functions string to module
         public final Map<String, ModuleData> globalsImports = new Object2ObjectOpenHashMap<>(); // imported global variables string to module
         public final Map<String, ModuleData> futureImports = new Object2ObjectOpenHashMap<>(); // imports not known before used
+        public final Map<String, String> importAliases = new Object2ObjectOpenHashMap<>(); // imported alias -> original name
 
         public ModuleData(Module parent, ModuleData other)
         {
             super();
-            // imports are just pointers, but they still point to the wrong modules (point to the parent)
             this.parent = parent;
             globalFunctions.putAll(other.globalFunctions);
-            other.globalVariables.forEach((key, value) ->
-            {
-                Value var = value.evalValue(null);
-                Value copy = var.deepcopy();
-                copy.boundVariable = var.boundVariable;
-                globalVariables.put(key, (c, t) -> copy);
-            });
+            // Lexical Scoping: we do NOT deepcopy anymore, we share references
+            globalVariables.putAll(other.globalVariables);
+            importAliases.putAll(other.importAliases);
         }
 
         public void setImportsBasedOn(ScriptHost host, ModuleData other)
@@ -177,16 +175,20 @@ public abstract class ScriptHost
             return;  // aready imported, once again, in case some discrepancies in names?
         }
         modules.put(module.name(), module);
-        ModuleData data = new ModuleData(module);
-        initializeModuleGlobals(data);
-        moduleData.put(module, data);
-        runModuleCode(c, module);
-        //moduleData.remove(module); // we are pooped already, but doesn't hurt to clean that up.
-        //modules.remove(module.getName());
-        //throw new InternalExpressionException("Failed to import a module "+moduleName);
+        
+        ModuleData data = scriptServer.moduleStateCache.get(module.name());
+        if (data == null) {
+            data = new ModuleData(module);
+            initializeModuleGlobals(data);
+            moduleData.put(module, data);
+            runModuleCode(c, module);
+            scriptServer.moduleStateCache.put(module.name(), data);
+        } else {
+            moduleData.put(module, data);
+        }
     }
 
-    public void importNames(Context c, Module targetModule, String sourceModuleName, List<String> identifiers)
+    public void importNames(Context c, Module targetModule, String sourceModuleName, List<Pair<String, String>> identifiers)
     {
         if (!moduleData.containsKey(targetModule))
         {
@@ -199,19 +201,25 @@ public abstract class ScriptHost
         {
             throw new InternalExpressionException("Cannot import from module that is not imported");
         }
-        for (String identifier : identifiers)
+        for (Pair<String, String> identifierPair : identifiers)
         {
-            if (sourceData.globalFunctions.containsKey(identifier))
+            String originalName = identifierPair.getLeft();
+            String alias = identifierPair.getRight();
+
+            if (sourceData.globalFunctions.containsKey(originalName))
             {
-                targetData.functionImports.put(identifier, sourceData);
+                targetData.functionImports.put(alias, sourceData);
             }
-            else if (sourceData.globalVariables.containsKey(identifier))
+            else if (sourceData.globalVariables.containsKey(originalName))
             {
-                targetData.globalsImports.put(identifier, sourceData);
+                targetData.globalsImports.put(alias, sourceData);
             }
             else
             {
-                targetData.futureImports.put(identifier, sourceData);
+                targetData.futureImports.put(alias, sourceData);
+            }
+            if (!originalName.equals(alias)) {
+                targetData.importAliases.put(alias, originalName);
             }
         }
     }
@@ -269,7 +277,8 @@ public abstract class ScriptHost
         ModuleData target = local.functionImports.get(name);
         if (target != null)
         {
-            ret = target.globalFunctions.get(name);
+            String originalName = local.importAliases.getOrDefault(name, name);
+            ret = target.globalFunctions.get(originalName);
             if (ret != null)
             {
                 return ret;
@@ -288,7 +297,8 @@ public abstract class ScriptHost
         }
         local.futureImports.remove(name);
         local.functionImports.put(name, target);
-        return target.globalFunctions.get(name);
+        String originalName = local.importAliases.getOrDefault(name, name);
+        return target.globalFunctions.get(originalName);
     }
 
     @Nullable
@@ -298,7 +308,8 @@ public abstract class ScriptHost
         {
             throw new InternalExpressionException("Cannot import " + name + ", either your imports are too deep or too loopy");
         }
-        if (source.globalFunctions.containsKey(name))
+        String originalName = source.importAliases.getOrDefault(name, name);
+        if (source.globalFunctions.containsKey(originalName))
         {
             return source;
         }
@@ -329,7 +340,8 @@ public abstract class ScriptHost
         ModuleData target = local.globalsImports.get(name);
         if (target != null)
         {
-            ret = target.globalVariables.get(name);
+            String originalName = local.importAliases.getOrDefault(name, name);
+            ret = target.globalVariables.get(originalName);
             if (ret != null)
             {
                 return ret;
@@ -348,7 +360,8 @@ public abstract class ScriptHost
         }
         local.futureImports.remove(name);
         local.globalsImports.put(name, target);
-        return target.globalVariables.get(name);
+        String originalName = local.importAliases.getOrDefault(name, name);
+        return target.globalVariables.get(originalName);
     }
 
     private ModuleData findModuleDataFromGlobalImports(String name, ModuleData source, int ttl)
@@ -357,7 +370,8 @@ public abstract class ScriptHost
         {
             throw new InternalExpressionException("Cannot import " + name + ", either your imports are too deep or too loopy");
         }
-        if (source.globalVariables.containsKey(name))
+        String originalName = source.importAliases.getOrDefault(name, name);
+        if (source.globalVariables.containsKey(originalName))
         {
             return source;
         }

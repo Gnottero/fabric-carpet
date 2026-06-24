@@ -289,6 +289,14 @@ public class Tokenizer
                 linepos--;
             }
             token.type = ch == '(' ? Token.TokenType.FUNCTION : Token.TokenType.VARIABLE;
+            
+            // Intercept special keywords for the import system
+            if (token.type == Token.TokenType.VARIABLE &&
+                (token.surface.equals("import") || token.surface.equals("from") || token.surface.equals("as")))
+            {
+                token.type = Token.TokenType.OPERATOR;
+                token.disguiseAs(" " + token.surface + " ", null);
+            }
         }
         else if (ch == '(' || ch == ')' || ch == ',' ||
                 ch == '{' || ch == '}' || ch == '[' || ch == ']')
