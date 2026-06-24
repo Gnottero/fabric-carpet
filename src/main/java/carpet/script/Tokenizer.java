@@ -172,22 +172,24 @@ public class Tokenizer
             {
                 isHex = true;
             }
+            int startPos = pos;
             while ((isHex
                     && isHexDigit(
                     ch))
                     || (Character.isDigit(ch) || ch == decimalSeparator || ch == 'e' || ch == 'E'
-                    || (ch == minusSign && token.length() > 0
-                    && ('e' == token.charAt(token.length() - 1)
-                    || 'E' == token.charAt(token.length() - 1)))
-                    || (ch == '+' && token.length() > 0
-                    && ('e' == token.charAt(token.length() - 1)
-                    || 'E' == token.charAt(token.length() - 1))))
+                    || (ch == minusSign && pos > startPos
+                    && ('e' == input.charAt(pos - 1)
+                    || 'E' == input.charAt(pos - 1)))
+                    || (ch == '+' && pos > startPos
+                    && ('e' == input.charAt(pos - 1)
+                    || 'E' == input.charAt(pos - 1))))
                     && (pos < input.length()))
             {
-                token.append(input.charAt(pos++));
+                pos++;
                 linepos++;
                 ch = pos == input.length() ? 0 : input.charAt(pos);
             }
+            token.surface = input.substring(startPos, pos);
             token.type = isHex ? Token.TokenType.HEX_LITERAL : Token.TokenType.LITERAL;
         }
         else if (ch == '\'')
@@ -200,6 +202,7 @@ public class Tokenizer
                 throw new ExpressionException(context, this.expression, token, "Program truncated");
             }
             ch = input.charAt(pos);
+            StringBuilder sb = new StringBuilder();
             while (ch != '\'')
             {
                 if (ch == '\\')
@@ -207,23 +210,23 @@ public class Tokenizer
                     char nextChar = peekNextChar();
                     if (nextChar == 'n')
                     {
-                        token.append('\n');
+                        sb.append('\n');
                     }
                     else if (nextChar == 't')
                     {
                         //throw new ExpressionException(context, this.expression, token,
                         //        "Tab character is not supported");
-                        token.append('\t');
+                        sb.append('\t');
                     }
                     else if (nextChar == 'r')
                     {
                         throw new ExpressionException(context, this.expression, token,
                                 "Carriage return character is not supported");
-                        //token.append('\r');
+                        //sb.append('\r');
                     }
                     else if (nextChar == '\\' || nextChar == '\'')
                     {
-                        token.append(nextChar);
+                        sb.append(nextChar);
                     }
                     else
                     {
@@ -239,7 +242,7 @@ public class Tokenizer
                 }
                 else
                 {
-                    token.append(input.charAt(pos++));
+                    sb.append(input.charAt(pos++));
                     linepos++;
                     if (ch == '\n')
                     {
@@ -253,6 +256,7 @@ public class Tokenizer
                 }
                 ch = input.charAt(pos);
             }
+            token.surface = sb.toString();
             pos++;
             linepos++;
             token.disguiseAs("'"+token.surface+"'", null);
@@ -260,13 +264,14 @@ public class Tokenizer
         }
         else if (Character.isLetter(ch) || "_".indexOf(ch) >= 0)
         {
-            while ((Character.isLetter(ch) || Character.isDigit(ch) || "_".indexOf(ch) >= 0
-                    || token.length() == 0 && "_".indexOf(ch) >= 0) && (pos < input.length()))
+            int startPos = pos;
+            while ((Character.isLetter(ch) || Character.isDigit(ch) || "_".indexOf(ch) >= 0) && (pos < input.length()))
             {
-                token.append(input.charAt(pos++));
+                pos++;
                 linepos++;
                 ch = pos == input.length() ? 0 : input.charAt(pos);
             }
+            token.surface = input.substring(startPos, pos);
             // Remove optional white spaces after function or variable name
             if (Character.isWhitespace(ch))
             {
@@ -305,7 +310,7 @@ public class Tokenizer
             {
                 token.type = Token.TokenType.MARKER;
             }
-            token.append(ch);
+            token.surface = String.valueOf(ch);
             pos++;
             linepos++;
 
@@ -338,14 +343,13 @@ public class Tokenizer
                     {
                         ch = input.charAt(pos++);
                         linepos++;
-                        greedyMatch += ch;
                     }
                     if (ch == '\n')
                     {
                         lineno++;
                         linepos = 0;
                     }
-                    token.append(greedyMatch);
+                    token.surface = input.substring(initialPos, pos);
                     token.type = Token.TokenType.MARKER;
                     return token; // skipping setting previous
                 }
@@ -362,18 +366,18 @@ public class Tokenizer
                 lineno++;
                 linepos = 0;
                 token.type = Token.TokenType.MARKER;
-                token.append('$');
+                token.surface = "$";
                 return token; // skipping previous token lookback
             }
             if (validOperatorSeenUntil != -1)
             {
-                token.append(input.substring(initialPos, validOperatorSeenUntil));
+                token.surface = input.substring(initialPos, validOperatorSeenUntil);
                 pos = validOperatorSeenUntil;
                 linepos = initialLinePos + validOperatorSeenUntil - initialPos;
             }
             else
             {
-                token.append(greedyMatch);
+                token.surface = greedyMatch;
             }
 
             if (previousToken == null || previousToken.type == Token.TokenType.OPERATOR

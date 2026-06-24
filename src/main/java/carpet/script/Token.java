@@ -75,13 +75,7 @@ public class Token implements Comparable<Token> {
         return this;
     }
 
-    public void append(char c) {
-        surface += c;
-    }
 
-    public void append(String s) {
-        surface += s;
-    }
 
     public char charAt(int pos) {
         return surface.charAt(pos);
