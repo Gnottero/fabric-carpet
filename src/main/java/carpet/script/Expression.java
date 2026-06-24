@@ -1317,8 +1317,7 @@ public class Expression
             this.op = op;
             this.args = args;
             this.token = token;
-            range = new ArrayList<>();
-            range.add(token);
+            range = Collections.singletonList(token);
         }
 
         public static ExpressionNode ofConstant(Value val, Token token)
