@@ -814,6 +814,75 @@ structure may depend on the biome, otherwise the default structure for this type
 
 Throws `unknown_structure` if structure doesn't exist.
 
+### `structure_save(name, from_pos, to_pos, include_entities?)`
+
+Saves the world region between `from_pos` and `to_pos` (inclusive corners, in any order) as a structure template 
+named `name`, exactly like a structure block in SAVE mode would. `name` is a resource location (`'foo'` means 
+`'minecraft:foo'`), and the template is written to `<world>/generated/<namespace>/structure/<name>.nbt`, making it 
+fully interoperable with structure blocks and loadable as a datapack structure. `include_entities` (default `false`) 
+controls whether entities in the region are stored in the template. Blocks configured via the `structureBlockIgnored` 
+carpet rule (structure voids by default) are not saved.
+
+Returns `true` if the structure was saved successfully, `false` otherwise.
+
+<pre>
+structure_save('my_house', 0 64 0, 10 74 10)  => true
+structure_save('base:vault', pos(player()), pos(player()) + [16, 16, 16], true)  => true
+</pre>
+
+### `structure_load(name, pos, rotation?, mirror?, include_entities?, integrity?, seed?)`
+
+Places the structure template `name` in the world, like a structure block in LOAD mode. `pos` is always the 
+minimum corner of the placed structure, regardless of rotation and mirror settings (unlike structure blocks, 
+which rotate the structure around themselves). Any template available to a structure block can be loaded, 
+including datapack structures (e.g. `'minecraft:igloo/top'`).
+
+Optional arguments mimic structure block settings:
+ * `rotation`: as a number (`0`, `90`, `180`, `270`, also `-90`) or a string 
+   (`'none'`, `'clockwise_90'`, etc.). Defaults to no rotation, `null` also means no rotation.
+ * `mirror`: `'none'`, `'left_right'` or `'front_back'`. Defaults to `'none'`.
+ * `include_entities`: whether entities stored in the template are placed, defaults to `true`.
+ * `integrity`: number from `0.0` to `1.0`, the ratio of blocks that get placed, defaults to `1.0`.
+ * `seed`: seed used for the integrity randomness, defaults to `0` meaning a fresh random seed each time.
+
+Returns `true` if the structure was placed, `false` if placement failed, and `null` if no template with that 
+name exists. Placement respects `without_updates(...)`, allowing structures to be placed without block updates.
+
+<pre>
+structure_load('my_house', 20 64 0)  => true
+structure_load('my_house', 40 64 0, 90, 'left_right')  => true
+structure_load('minecraft:end_city/tower_base', 60 64 0, null, null, false, 0.5)  => true
+</pre>
+
+### `structure_matches(name, from_pos, to_pos, rotation?, mirror?)`
+
+Checks if the world region between `from_pos` and `to_pos` (inclusive corners, in any order, like `structure_save`) 
+matches the structure template `name`, under the same `rotation` and `mirror` semantics as `structure_load` - a 
+region placed with `structure_load(name, pos, rot, mir)` always matches with `from_pos` at `pos` and `to_pos` at 
+`pos + structure_size(name, rot) - 1`. If the region size differs from the (rotated) template size, the result is 
+always `false`. Block states are compared exactly, including air stored in the template; structure voids in the 
+template match any block; block entity data (like container contents) is not compared. For templates with multiple 
+palettes (like shipwrecks), matching any palette counts as a match.
+
+Returns `true` if the area matches the template, `false` if it doesn't, and `null` if no template with that 
+name exists.
+
+<pre>
+structure_load('my_house', 20 64 0); structure_matches('my_house', 20 64 0, [20,64,0] + structure_size('my_house') - 1)  => true
+structure_matches('my_house', 40 64 0, 44 68 4, 90, 'left_right')  => true
+</pre>
+
+### `structure_size(name, rotation?)`
+
+Returns the size of the structure template `name` as a `[x, y, z]` triple, or `null` if no template with that name 
+exists. With the optional `rotation` (same format as `structure_load`), returns the size of the rotated structure, 
+i.e. with `90` and `270` the `x` and `z` dimensions are swapped.
+
+<pre>
+structure_size('my_house')  => [5, 5, 5]
+structure_size('minecraft:end_city/tower_base', 90)  => [8, 6, 8]
+</pre>
+
 ### `plop(pos, what)`
 
 Plops a structure or a feature at a given `pos`, so block, triple position coordinates or a list of coordinates. 

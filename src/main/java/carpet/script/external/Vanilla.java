@@ -5,6 +5,7 @@ import carpet.fakes.*;
 import carpet.mixins.Objective_scarpetMixin;
 import carpet.mixins.PoiRecord_scarpetMixin;
 import carpet.mixins.Scoreboard_scarpetMixin;
+import carpet.mixins.StructureTemplate_scarpetMixin;
 import carpet.network.ServerNetworkHandler;
 import carpet.script.CarpetScriptServer;
 import carpet.script.EntityEventsGroup;
@@ -55,6 +56,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.pattern.BlockInWorld;
 import net.minecraft.world.level.levelgen.DensityFunction;
 import net.minecraft.world.level.levelgen.RandomState;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.scores.Objective;
@@ -117,6 +119,11 @@ public class Vanilla
     public static CompoundTag BlockInput_getTag(BlockInput blockInput)
     {
         return ((BlockStateArgumentInterface) blockInput).getCMTag();
+    }
+
+    public static List<StructureTemplate.Palette> StructureTemplate_getPalettes(StructureTemplate template)
+    {
+        return ((StructureTemplate_scarpetMixin) (Object) template).getPalettes();
     }
 
     public static CarpetScriptServer MinecraftServer_getScriptServer(MinecraftServer server)

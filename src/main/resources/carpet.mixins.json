@@ -21,6 +21,7 @@
     "StructureBlockEntity_limitsMixin",
     "ServerboundSetStructureBlockPacketMixin",
     "StructureTemplate_fillUpdatesMixin",
+    "StructureTemplate_scarpetMixin",
     "ServerGamePacketListenerImpl_interactionUpdatesMixin",
     "FlowingFluid_liquidDamageDisabledMixin",
     "ServerStatus_motdMixin",

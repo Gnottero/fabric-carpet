@@ -34,6 +34,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Vec3i;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.QuartPos;
@@ -55,6 +56,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.util.ProblemReporter;
+import net.minecraft.util.RandomSource;
 import net.minecraft.util.random.WeightedList;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.ServerExplosion;
@@ -68,6 +70,9 @@ import net.minecraft.world.level.levelgen.NoiseRouter;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureType;
+import net.minecraft.world.level.levelgen.structure.templatesystem.BlockRotProcessor;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.saveddata.WeatherData;
 import net.minecraft.world.level.storage.TagValueInput;
 import org.apache.commons.lang3.mutable.MutableBoolean;
@@ -120,8 +125,11 @@ import net.minecraft.world.level.biome.Climate;
 import net.minecraft.world.level.biome.MultiNoiseBiomeSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Mirror;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.StructureBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -260,6 +268,63 @@ public class WorldAccess
         {
             level.getChunkSource().getGeneratorState().ensureStructuresGenerated();
         }
+    }
+
+    private static Rotation getRotation(Value v)
+    {
+        if (v == null || v.isNull())
+        {
+            return Rotation.NONE;
+        }
+        return switch (v.getString().toLowerCase(Locale.ROOT))
+        {
+            case "none", "0" -> Rotation.NONE;
+            case "90", "clockwise_90" -> Rotation.CLOCKWISE_90;
+            case "180", "-180", "clockwise_180" -> Rotation.CLOCKWISE_180;
+            case "270", "-90", "counterclockwise_90" -> Rotation.COUNTERCLOCKWISE_90;
+            default -> throw new InternalExpressionException("Invalid rotation: " + v.getString() + ", must be 0, 90, 180 or 270");
+        };
+    }
+
+    private static Mirror getMirror(Value v)
+    {
+        if (v == null || v.isNull())
+        {
+            return Mirror.NONE;
+        }
+        return switch (v.getString().toLowerCase(Locale.ROOT))
+        {
+            case "none" -> Mirror.NONE;
+            case "left_right" -> Mirror.LEFT_RIGHT;
+            case "front_back" -> Mirror.FRONT_BACK;
+            default -> throw new InternalExpressionException("Invalid mirror: " + v.getString() + ", must be 'none', 'left_right' or 'front_back'");
+        };
+    }
+
+    // rotation and mirror move the structure around the anchor point - shifting it back keeps
+    // the requested position always at the minimum corner of the transformed structure
+    private static BlockPos templateAnchor(StructureTemplate template, StructurePlaceSettings settings, BlockPos pos)
+    {
+        BoundingBox box = template.getBoundingBox(settings, BlockPos.ZERO);
+        return pos.offset(-box.minX(), -box.minY(), -box.minZ());
+    }
+
+    private static boolean paletteMatches(ServerLevel level, StructureTemplate.Palette palette, StructurePlaceSettings settings, BlockPos origin)
+    {
+        for (StructureTemplate.StructureBlockInfo blockInfo : palette.blocks())
+        {
+            BlockState expected = blockInfo.state();
+            if (expected.is(Blocks.STRUCTURE_VOID))
+            {
+                continue;
+            }
+            BlockPos worldPos = StructureTemplate.calculateRelativePosition(settings, blockInfo.pos()).offset(origin);
+            if (level.getBlockState(worldPos) != expected.mirror(settings.getMirror()).rotate(settings.getRotation()))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static void apply(Expression expression)
@@ -1587,6 +1652,123 @@ public class WorldAccess
                 }
             });
             return result[0]; // preventing from lazy evaluating of the result in case a future completes later
+        });
+
+        expression.addContextFunction("structure_save", -1, (c, t, lv) ->
+        {
+            CarpetContext cc = (CarpetContext) c;
+            if (lv.size() < 3)
+            {
+                throw new InternalExpressionException("'structure_save' requires a structure name and two corner positions");
+            }
+            Identifier structureId = InputValidator.identifierOf(lv.get(0).getString().toLowerCase(Locale.ROOT));
+            BlockArgument fromLocator = BlockArgument.findIn(cc, lv, 1);
+            BlockArgument toLocator = BlockArgument.findIn(cc, lv, fromLocator.offset);
+            boolean includeEntities = lv.size() > toLocator.offset && lv.get(toLocator.offset).getBoolean();
+
+            BlockPos from = fromLocator.block.getPos();
+            BlockPos to = toLocator.block.getPos();
+            BlockPos origin = new BlockPos(Math.min(from.getX(), to.getX()), Math.min(from.getY(), to.getY()), Math.min(from.getZ(), to.getZ()));
+            Vec3i size = new Vec3i(Math.abs(from.getX() - to.getX()) + 1, Math.abs(from.getY() - to.getY()) + 1, Math.abs(from.getZ() - to.getZ()) + 1);
+
+            ServerLevel world = cc.level();
+            Value[] result = new Value[]{Value.FALSE};
+            cc.server().executeBlocking(() ->
+                    result[0] = BooleanValue.of(StructureBlockEntity.saveStructure(world, structureId, origin, size, !includeEntities, "", true, List.of()))
+            );
+            return result[0];
+        });
+
+        expression.addContextFunction("structure_load", -1, (c, t, lv) ->
+        {
+            CarpetContext cc = (CarpetContext) c;
+            if (lv.size() < 2)
+            {
+                throw new InternalExpressionException("'structure_load' requires a structure name and a position");
+            }
+            Identifier structureId = InputValidator.identifierOf(lv.get(0).getString().toLowerCase(Locale.ROOT));
+            BlockArgument locator = BlockArgument.findIn(cc, lv, 1);
+            Rotation rotation = getRotation(lv.size() > locator.offset ? lv.get(locator.offset) : null);
+            Mirror mirror = getMirror(lv.size() > locator.offset + 1 ? lv.get(locator.offset + 1) : null);
+            boolean includeEntities = lv.size() <= locator.offset + 2 || lv.get(locator.offset + 2).getBoolean();
+            float integrity = lv.size() > locator.offset + 3 ? Mth.clamp(NumericValue.asNumber(lv.get(locator.offset + 3)).getFloat(), 0.0F, 1.0F) : 1.0F;
+            long seed = lv.size() > locator.offset + 4 ? NumericValue.asNumber(lv.get(locator.offset + 4)).getLong() : 0L;
+
+            ServerLevel world = cc.level();
+            BlockPos pos = locator.block.getPos();
+            Value[] result = new Value[]{Value.NULL};
+            cc.server().executeBlocking(() -> world.getStructureManager().get(structureId).ifPresent(template ->
+            {
+                StructurePlaceSettings settings = new StructurePlaceSettings()
+                        .setRotation(rotation)
+                        .setMirror(mirror)
+                        .setIgnoreEntities(!includeEntities);
+                RandomSource random = seed == 0L ? RandomSource.create() : RandomSource.create(seed);
+                if (integrity < 1.0F)
+                {
+                    settings.clearProcessors().addProcessor(new BlockRotProcessor(integrity)).setRandom(random);
+                }
+                BlockPos anchor = templateAnchor(template, settings, pos);
+                result[0] = BooleanValue.of(template.placeInWorld(world, anchor, anchor, settings, random, Block.UPDATE_CLIENTS));
+            }));
+            return result[0];
+        });
+
+        expression.addContextFunction("structure_matches", -1, (c, t, lv) ->
+        {
+            CarpetContext cc = (CarpetContext) c;
+            if (lv.size() < 3)
+            {
+                throw new InternalExpressionException("'structure_matches' requires a structure name and two corner positions");
+            }
+            Identifier structureId = InputValidator.identifierOf(lv.get(0).getString().toLowerCase(Locale.ROOT));
+            BlockArgument fromLocator = BlockArgument.findIn(cc, lv, 1);
+            BlockArgument toLocator = BlockArgument.findIn(cc, lv, fromLocator.offset);
+            Rotation rotation = getRotation(lv.size() > toLocator.offset ? lv.get(toLocator.offset) : null);
+            Mirror mirror = getMirror(lv.size() > toLocator.offset + 1 ? lv.get(toLocator.offset + 1) : null);
+
+            ServerLevel world = cc.level();
+            Optional<StructureTemplate> template = world.getStructureManager().get(structureId);
+            if (template.isEmpty())
+            {
+                return Value.NULL;
+            }
+            BlockPos from = fromLocator.block.getPos();
+            BlockPos to = toLocator.block.getPos();
+            BlockPos min = new BlockPos(Math.min(from.getX(), to.getX()), Math.min(from.getY(), to.getY()), Math.min(from.getZ(), to.getZ()));
+            StructurePlaceSettings settings = new StructurePlaceSettings().setRotation(rotation).setMirror(mirror);
+            BoundingBox box = template.get().getBoundingBox(settings, BlockPos.ZERO);
+            // an area of the wrong size can never match the structure
+            if (Math.abs(from.getX() - to.getX()) + 1 != box.getXSpan()
+                    || Math.abs(from.getY() - to.getY()) + 1 != box.getYSpan()
+                    || Math.abs(from.getZ() - to.getZ()) + 1 != box.getZSpan())
+            {
+                return Value.FALSE;
+            }
+            BlockPos anchor = min.offset(-box.minX(), -box.minY(), -box.minZ());
+            for (StructureTemplate.Palette palette : Vanilla.StructureTemplate_getPalettes(template.get()))
+            {
+                if (paletteMatches(world, palette, settings, anchor))
+                {
+                    return Value.TRUE;
+                }
+            }
+            return Value.FALSE;
+        });
+
+        expression.addContextFunction("structure_size", -1, (c, t, lv) ->
+        {
+            CarpetContext cc = (CarpetContext) c;
+            if (lv.isEmpty())
+            {
+                throw new InternalExpressionException("'structure_size' requires a structure name");
+            }
+            Identifier structureId = InputValidator.identifierOf(lv.get(0).getString().toLowerCase(Locale.ROOT));
+            Rotation rotation = getRotation(lv.size() > 1 ? lv.get(1) : null);
+            return cc.level().getStructureManager().get(structureId)
+                    .map(template -> template.getSize(rotation))
+                    .map(size -> ValueConversions.of(new BlockPos(size.getX(), size.getY(), size.getZ())))
+                    .orElse(Value.NULL);
         });
 
         // todo maybe enable chunk blending?
